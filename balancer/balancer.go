@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"net/http"
+	"net/http/httputil"
 	"sync/atomic"
 	"time"
 )
@@ -46,4 +47,15 @@ func (b *Balancer) HealthCheck(interval time.Duration) {
 			}
 		}
 	}
+}
+
+func (b *Balancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	backend := b.NextBackend()
+	if backend == nil {
+		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(backend.URL)
+	proxy.ServeHTTP(w, r)
 }
