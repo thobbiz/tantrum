@@ -1,6 +1,10 @@
 package balancer
 
-import "sync/atomic"
+import (
+	"net/http"
+	"sync/atomic"
+	"time"
+)
 
 type Balancer struct {
 	Backends []*Backend
@@ -26,4 +30,20 @@ func (b *Balancer) NextBackend() *Backend {
 	}
 
 	return nil
+}
+
+func (b *Balancer) HealthCheck(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		for _, backend := range b.Backends {
+			resp, err := http.Get(backend.URL.String())
+			if err != nil || resp.StatusCode >= 500 {
+				backend.SetAlive(false)
+			} else {
+				backend.SetAlive(true)
+			}
+		}
+	}
 }

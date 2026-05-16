@@ -6,7 +6,7 @@ import (
 )
 
 type Backend struct {
-	addr  *url.URL
+	URL   *url.URL
 	alive bool
 	mux   sync.RWMutex
 }
