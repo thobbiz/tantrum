@@ -11,6 +11,17 @@ type Backend struct {
 	mux   sync.RWMutex
 }
 
+func NewBackend(rawURL string) (*Backend, error) {
+	parsedUrl, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	return &Backend{
+		URL:   parsedUrl,
+		alive: true,
+	}, nil
+}
+
 func (B *Backend) SetAlive(alive bool) {
 	B.mux.Lock()
 	defer B.mux.Unlock()
