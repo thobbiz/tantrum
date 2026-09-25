@@ -1,12 +1,22 @@
 package balancer
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"sync/atomic"
 	"time"
 )
 
 var healthClient = http.Client{Timeout: 2 * time.Second}
+
+var idempotentMethods = map[string]bool{
+	http.MethodGet:     true,
+	http.MethodHead:    true,
+	http.MethodOptions: true,
+	http.MethodPut:     true,
+	http.MethodDelete:  true,
+}
 
 type Balancer struct {
 	Backends []*Backend
@@ -29,6 +39,20 @@ func (b *Balancer) NextBackend() *Backend {
 		idx := atomic.AddUint64(&b.Counter, 1) % total
 		backend := b.Backends[idx]
 		if backend.IsAlive() {
+			return backend
+		}
+	}
+	return nil
+}
+
+// nextUntried returns the next backend that has not been tried yet for a particular request
+func (b *Balancer) nextUntried(tried map[*Backend]bool) *Backend {
+	total := uint64(len(b.Backends))
+
+	for range total {
+		idx := atomic.AddUint64(&b.Counter, 1) % total
+		backend := b.Backends[idx]
+		if backend.IsAlive() && !tried[backend] {
 			return backend
 		}
 	}
@@ -65,11 +89,50 @@ func (b *Balancer) HealthCheck(interval time.Duration) {
 
 // ServeHTTP satisfies the http.Handler interface
 func (b *Balancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	backend := b.NextBackend()
-	if backend == nil {
-		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
-		return
+	// Buffer the request body once so each retry attempt can replay it —
+	// Backend.Proxy.ServeHTTP consumes r.Body, so reusing the same
+	// *http.Request across attempts would send an empty body otherwise.
+	var bodyBytes []byte
+	if r.Body != nil {
+		var err error
+		bodyBytes, err = io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		r.Body.Close()
 	}
 
-	backend.Proxy.ServeHTTP(w, r)
+	maxAttempts := len(b.Backends)
+	if !idempotentMethods[r.Method] {
+		maxAttempts = 1
+	}
+
+	tried := make(map[*Backend]bool)
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		backend := b.nextUntried(tried)
+		if backend == nil {
+			break
+		}
+		tried[backend] = true
+
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+		buf := newBufferedResponse()
+		backend.Proxy.ServeHTTP(buf, r)
+
+		if buf.statusCode < 500 {
+			for k, vv := range buf.Header() {
+				for _, v := range vv {
+					w.Header().Add(k, v)
+				}
+			}
+			w.WriteHeader(buf.statusCode)
+			w.Write(buf.body.Bytes())
+			return
+		}
+	}
+
+	http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 }
