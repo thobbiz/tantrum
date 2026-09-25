@@ -1,8 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/thobbiz/load-balancer/balancer"
@@ -33,7 +38,25 @@ func main() {
 		Handler: lb,
 	}
 
-	log.Println("starting load-balancing server on 8080")
-	err = srv.ListenAndServe()
-	log.Fatal(err)
+	go func() {
+		log.Println("starting load-balancing server on 8080")
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("failed to start load-balancing server: %v", err)
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	<-stop
+
+	log.Println("shutdown signal received, draining connections")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err = srv.Shutdown(ctx); err != nil {
+		log.Fatalf("graceful shutdown failed: %v", err)
+	}
+
+	log.Println("load-balancing server stopped cleanly")
 }
