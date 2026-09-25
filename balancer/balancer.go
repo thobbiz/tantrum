@@ -2,7 +2,6 @@ package balancer
 
 import (
 	"net/http"
-	"net/http/httputil"
 	"sync/atomic"
 	"time"
 )
@@ -72,6 +71,5 @@ func (b *Balancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(backend.URL)
-	proxy.ServeHTTP(w, r)
+	backend.Proxy.ServeHTTP(w, r)
 }
