@@ -14,6 +14,7 @@ type Balancer struct {
 	Counter  uint64
 }
 
+// NewBalancer creates a new Balancer with the given backends
 func NewBalancer(backends []*Backend) *Balancer {
 	return &Balancer{
 		Backends: backends,
@@ -21,6 +22,7 @@ func NewBalancer(backends []*Backend) *Balancer {
 	}
 }
 
+// NextBackend picks the next backend to handle the request using a round-robin algorithm
 func (b *Balancer) NextBackend() *Backend {
 	total := uint64(len(b.Backends))
 
@@ -34,6 +36,7 @@ func (b *Balancer) NextBackend() *Backend {
 	return nil
 }
 
+// checkBackend sends a health check request to the backend and updates its alive status
 func (b *Balancer) checkBackend(backend *Backend) {
 	resp, err := healthClient.Get(backend.URL.String())
 	if err != nil {
@@ -44,6 +47,7 @@ func (b *Balancer) checkBackend(backend *Backend) {
 	backend.SetAlive(resp.StatusCode < 500)
 }
 
+// HealthCheck performs a health check on all backends at the specified interval
 func (b *Balancer) HealthCheck(interval time.Duration) {
 	// check immediately instead of waiting for 10 seconds
 	for _, backend := range b.Backends {
@@ -60,6 +64,7 @@ func (b *Balancer) HealthCheck(interval time.Duration) {
 	}
 }
 
+// ServeHTTP satisfies the http.Handler interface
 func (b *Balancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backend := b.NextBackend()
 	if backend == nil {
