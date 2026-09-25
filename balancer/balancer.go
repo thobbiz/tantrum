@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+var healthClient = http.Client{Timeout: 2 * time.Second}
+
 type Balancer struct {
 	Backends []*Backend
 	Counter  uint64
@@ -29,22 +31,31 @@ func (b *Balancer) NextBackend() *Backend {
 			return backend
 		}
 	}
-
 	return nil
 }
 
+func (b *Balancer) checkBackend(backend *Backend) {
+	resp, err := healthClient.Get(backend.URL.String())
+	if err != nil {
+		backend.SetAlive(false)
+		return
+	}
+	defer resp.Body.Close()
+	backend.SetAlive(resp.StatusCode < 500)
+}
+
 func (b *Balancer) HealthCheck(interval time.Duration) {
+	// check immediately instead of waiting for 10 seconds
+	for _, backend := range b.Backends {
+		b.checkBackend(backend)
+	}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		for _, backend := range b.Backends {
-			resp, err := http.Get(backend.URL.String())
-			if err != nil || resp.StatusCode >= 500 {
-				backend.SetAlive(false)
-			} else {
-				backend.SetAlive(true)
-			}
+			b.checkBackend(backend)
 		}
 	}
 }
