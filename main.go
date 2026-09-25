@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -14,24 +16,28 @@ import (
 )
 
 func main() {
-	backend1, err := balancer.NewBackend("http://localhost:8081")
-	if err != nil {
-		log.Fatalf("failed to create backend: %v", err)
-	}
-	backend2, err := balancer.NewBackend("http://localhost:8082")
-	if err != nil {
-		log.Fatalf("failed to create backend: %v", err)
-	}
+	backendsFlag := flag.String("backends", "", "comma separated lis of backend URLs (e.g http://localhost:8081,http://localhost:8082)")
+	intervalFlag := flag.Duration("health-interval", 0, "health-check interval, e.g 10s (default 10s)")
+	flag.Parse()
 
-	backend3, err := balancer.NewBackend("http://localhost:8083")
-	if err != nil {
-		log.Fatalf("failed to create backend: %v", err)
+	rawBackends := resolveBackends(*backendsFlag)
+	if len(rawBackends) == 0 {
+		log.Fatal("no backends configured: pass -backends or set the BACKENDS env var")
 	}
 
-	q := []*balancer.Backend{backend1, backend2, backend3}
-	lb := balancer.NewBalancer(q)
+	interval := resolveInterval(*intervalFlag)
 
-	go lb.HealthCheck(10 * time.Second)
+	var backends []*balancer.Backend
+	for _, raw := range rawBackends {
+		b, err := balancer.NewBackend(raw)
+		if err != nil {
+			log.Fatalf("failed to create backend %q: %v", raw, err)
+		}
+		backends = append(backends, b)
+	}
+
+	lb := balancer.NewBalancer(backends)
+	go lb.HealthCheck(interval)
 
 	srv := &http.Server{
 		Addr:    ":8080",
@@ -54,9 +60,45 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err = srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("graceful shutdown failed: %v", err)
 	}
 
 	log.Println("load-balancing server stopped cleanly")
+}
+
+func resolveBackends(flagValue string) []string {
+	raw := flagValue
+	if raw == "" {
+		raw = os.Getenv("BACKENDS")
+	}
+
+	if raw == "" {
+		log.Println("No flag value read, defaulting to localhost value for local testing")
+		raw = "http://localhost:8081,http://localhost:8082,http://localhost:8083"
+	}
+
+	var backends []string
+	for part := range strings.SplitSeq(raw, ",") {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			backends = append(backends, trimmed)
+		}
+	}
+	return backends
+}
+
+func resolveInterval(flagValue time.Duration) time.Duration {
+	if flagValue > 0 {
+		return flagValue
+	}
+
+	if raw := os.Getenv("HEALTH_INTERVAL"); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil {
+			return d
+		}
+		log.Printf("invalid HEALTH_INTERVAL %q, falling back to default 10s", raw)
+	}
+
+	return 10 * time.Second
 }
