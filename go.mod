@@ -1,3 +1,3 @@
-module github.com/thobbiz/load-balancer
+module github.com/thobbiz/tantrum
 
 go 1.26.2

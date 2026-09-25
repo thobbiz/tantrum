@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/thobbiz/load-balancer/balancer"
+	"github.com/thobbiz/tantrum/balancer"
 )
 
 func main() {
