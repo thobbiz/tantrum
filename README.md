@@ -142,7 +142,6 @@ The retry-on-failure behavior in `ServeHTTP` is currently verified manually rath
 ## Roadmap / ideas
 - Configurable health-check path (e.g. `/healthz`) instead of `/`
 - Automated test coverage for the retry path using `httptest.Server`
-- Dockerfile / docker-compose for a one-command local demo
 - Optional streaming mode for responses that don't need retry support
 - Pluggable balancing strategies (least-connections, weighted round robin)
 
